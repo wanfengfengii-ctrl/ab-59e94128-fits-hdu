@@ -1,0 +1,39 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fits-audit:latest
+    environment:
+      # Internal listen port; the published host port is configurable below.
+      FITS_HOST: 0.0.0.0
+      FITS_PORT: "8080"
+    ports:
+      # Host port is configurable: FITS_API_PORT=9090 docker compose up -d
+      - "${FITS_API_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status == 200 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 2s
+    restart: unless-stopped
+
+  # One-shot service: builds the image, waits for web health, runs the code
+  # tests, application build and the legal / corrupted / truncated HTTP smoke
+  # verdicts, then exits. Its exit code is a bit-mask:
+  #   1 build, 2 tests, 4 legal, 8 digest-corruption, 16 truncation
+  verify:
+    image: fits-audit:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      web:
+        condition: service_healthy
+    command: ["python", "scripts/verify.py", "--base-url", "http://web:8080"]
+    restart: "no"
